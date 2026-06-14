@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AppState, StallItem, Product, DiscountRule, Scene, SimulationResult, ActiveTab } from '@/types';
+import type { AppState, StallItem, Product, DiscountRule, Scene, SimulationResult, ActiveTab, InventoryAlert } from '@/types';
 import { defaultProducts } from '@/data/products';
 import { defaultDiscountRules, defaultStallItems } from '@/data/materials';
 import { scenes } from '@/data/scenes';
@@ -63,6 +63,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   isSimulating: false,
   simulationHours: persisted?.simulationHours ?? 4,
   selectedItemId: null,
+  inventoryAlerts: [],
+  dismissedAlertIds: new Set<string>(),
 
   setActiveTab: (tab: ActiveTab) => set({ activeTab: tab }),
   setSelectedItemId: (id: string | null) => set({ selectedItemId: id }),
@@ -125,6 +127,21 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   clearSimulationResults: () => set({ simulationResults: [] }),
 
+  addInventoryAlert: (alert: InventoryAlert) =>
+    set((state) => {
+      const exists = state.inventoryAlerts.some((a) => a.productId === alert.productId);
+      if (exists) return state;
+      return { inventoryAlerts: [...state.inventoryAlerts, alert] };
+    }),
+
+  dismissAlert: (productId: string) =>
+    set((state) => ({
+      inventoryAlerts: state.inventoryAlerts.filter((a) => a.productId !== productId),
+      dismissedAlertIds: new Set([...state.dismissedAlertIds, productId]),
+    })),
+
+  clearInventoryAlerts: () => set({ inventoryAlerts: [], dismissedAlertIds: new Set() }),
+
   resetAll: () => {
     localStorage.removeItem(STORAGE_KEY);
     if (saveTimeout) {
@@ -141,6 +158,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
       simulationHours: 4,
       selectedItemId: null,
       activeTab: 'setup',
+      inventoryAlerts: [],
+      dismissedAlertIds: new Set(),
     });
   },
 

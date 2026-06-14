@@ -68,6 +68,16 @@ export interface SimulationResult {
   conversionRate: number;
 }
 
+export interface InventoryAlert {
+  productId: string;
+  productName: string;
+  productEmoji: string;
+  initialStock: number;
+  currentStock: number;
+  estimatedSelloutHours: number;
+  timestamp: number;
+}
+
 export type ActiveTab = 'setup' | 'pricing' | 'traffic' | 'review';
 
 export interface AppState {
@@ -80,6 +90,9 @@ export interface AppState {
   isSimulating: boolean;
   simulationHours: number;
   selectedItemId: string | null;
+
+  inventoryAlerts: InventoryAlert[];
+  dismissedAlertIds: Set<string>;
 
   setActiveTab: (tab: ActiveTab) => void;
   setSelectedItemId: (id: string | null) => void;
@@ -96,6 +109,9 @@ export interface AppState {
   setSimulating: (val: boolean) => void;
   addSimulationResult: (result: SimulationResult) => void;
   clearSimulationResults: () => void;
+  addInventoryAlert: (alert: InventoryAlert) => void;
+  dismissAlert: (productId: string) => void;
+  clearInventoryAlerts: () => void;
   resetAll: () => void;
   saveToLocalStorage: () => void;
   loadFromLocalStorage: () => void;

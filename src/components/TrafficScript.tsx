@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Clock, Users, DollarSign, Eye } from 'lucide-react';
+import { Play, Pause, RotateCcw, Clock, Users, DollarSign, Eye, AlertTriangle, X } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { scenes } from '@/data/scenes';
 import { TrafficSimulation } from '@/services/TrafficSimulation';
@@ -20,6 +20,11 @@ export default function TrafficScript() {
     setSimulationHours,
     setActiveTab,
     discountRules,
+    inventoryAlerts,
+    addInventoryAlert,
+    dismissAlert,
+    clearInventoryAlerts,
+    dismissedAlertIds,
   } = useAppStore();
 
   const [currentHour, setCurrentHour] = useState(0);
@@ -30,16 +35,63 @@ export default function TrafficScript() {
   const timerRef = useRef<number | null>(null);
   const customerAnimRef = useRef<HTMLDivElement>(null);
   const [customers, setCustomers] = useState<{ id: number; emoji: string; x: number; delay: number }[]>([]);
+  const initialStocksRef = useRef<Record<string, number>>({});
 
   const customerEmojis = ['👩', '👨', '👧', '👦', '🧑', '👵', '👴', '👱‍♀️', '👨‍🎓', '👩‍🎓'];
 
+  const checkInventoryAlerts = (result: SimulationResult) => {
+    Object.entries(result.productSales).forEach(([productId, sale]) => {
+      const initialStock = initialStocksRef.current[productId];
+      if (initialStock === undefined) return;
+      if (sale.remaining > initialStock * 0.2) return;
+
+      const alreadyDismissed = dismissedAlertIds.has(productId);
+      const alreadyAlerted = inventoryAlerts.some((a) => a.productId === productId);
+      if (alreadyDismissed || alreadyAlerted) return;
+
+      const product = products.find((p) => p.id === productId);
+      if (!product) return;
+
+      const salesHistory = simulationResults
+        .map((r) => r.productSales[productId]?.sold || 0);
+      salesHistory.push(sale.sold);
+      const recentSales = salesHistory.slice(-3);
+      const avgSalesPerHour = recentSales.reduce((s, v) => s + v, 0) / recentSales.length;
+
+      const estimatedSelloutHours = avgSalesPerHour > 0
+        ? Math.ceil(sale.remaining / avgSalesPerHour)
+        : 99;
+
+      addInventoryAlert({
+        productId,
+        productName: product.name,
+        productEmoji: product.emoji,
+        initialStock,
+        currentStock: sale.remaining,
+        estimatedSelloutHours,
+        timestamp: Date.now(),
+      });
+    });
+  };
+
   const startSimulation = () => {
     if (!selectedScene) return;
+
+    if (simulationResults.length === 0) {
+      const stocks: Record<string, number> = {};
+      products.forEach((p) => { stocks[p.id] = p.stock; });
+      initialStocksRef.current = stocks;
+      clearInventoryAlerts();
+    }
 
     if (simulationResults.length > 0 && !isSimulating) {
       clearSimulationResults();
       setCurrentHour(0);
       setProgress(0);
+      const stocks: Record<string, number> = {};
+      products.forEach((p) => { stocks[p.id] = p.stock; });
+      initialStocksRef.current = stocks;
+      clearInventoryAlerts();
     }
 
     setSimulating(true);
@@ -69,6 +121,8 @@ export default function TrafficScript() {
         setCurrentHour(hourIndex + 1);
         setProgress(((hourIndex + 1) / simulationHours) * 100);
 
+        checkInventoryAlerts(result);
+
         const newCustomers = Array.from({ length: Math.min(20, Math.floor(result.visitors / 10)) }).map((_, i) => ({
           id: Date.now() + i,
           emoji: customerEmojis[Math.floor(Math.random() * customerEmojis.length)],
@@ -96,11 +150,19 @@ export default function TrafficScript() {
   const resetSimulation = () => {
     pauseSimulation();
     clearSimulationResults();
+    clearInventoryAlerts();
     setCurrentHour(0);
     setProgress(0);
     setLiveResult(null);
     setCustomers([]);
+    initialStocksRef.current = {};
   };
+
+  useEffect(() => {
+    if (inventoryAlerts.length > 0 && isSimulating) {
+      pauseSimulation();
+    }
+  }, [inventoryAlerts]);
 
   useEffect(() => {
     return () => {
@@ -380,6 +442,53 @@ export default function TrafficScript() {
                 </p>
               </div>
             </div>
+
+            {inventoryAlerts.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium text-red-600 flex items-center gap-1">
+                  <AlertTriangle className="w-4 h-4" />
+                  库存告警
+                </h4>
+                {inventoryAlerts.map((alert) => (
+                  <div
+                    key={alert.productId}
+                    className="relative p-3 bg-red-50 border border-red-200 rounded-xl animate-pulse"
+                  >
+                    <button
+                      onClick={() => dismissAlert(alert.productId)}
+                      className="absolute top-2 right-2 text-red-400 hover:text-red-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xl">{alert.productEmoji}</span>
+                      <span className="font-bold text-sm text-red-700">{alert.productName}</span>
+                    </div>
+                    <div className="text-xs text-red-600 space-y-0.5 mb-2">
+                      <p>剩余库存：<span className="font-bold">{alert.currentStock}</span> / {alert.initialStock}</p>
+                      <p>预计 <span className="font-bold">{alert.estimatedSelloutHours}</span> 小时内售罄</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => dismissAlert(alert.productId)}
+                        className="flex-1 text-xs py-1.5 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 transition-colors"
+                      >
+                        暂停调整库存
+                      </button>
+                      <button
+                        onClick={() => {
+                          dismissAlert(alert.productId);
+                          startSimulation();
+                        }}
+                        className="flex-1 text-xs py-1.5 bg-gray-400 text-white rounded-lg font-medium hover:bg-gray-500 transition-colors"
+                      >
+                        忽略并继续
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div>
               <h4 className="text-sm font-medium text-gray-700 mb-2">逐时记录</h4>
