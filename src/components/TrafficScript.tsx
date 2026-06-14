@@ -36,6 +36,7 @@ export default function TrafficScript() {
   const customerAnimRef = useRef<HTMLDivElement>(null);
   const [customers, setCustomers] = useState<{ id: number; emoji: string; x: number; delay: number }[]>([]);
   const initialStocksRef = useRef<Record<string, number>>({});
+  const allResultsRef = useRef<SimulationResult[]>([]);
 
   const customerEmojis = ['👩', '👨', '👧', '👦', '🧑', '👵', '👴', '👱‍♀️', '👨‍🎓', '👩‍🎓'];
 
@@ -77,22 +78,18 @@ export default function TrafficScript() {
   const startSimulation = () => {
     if (!selectedScene) return;
 
-    if (simulationResults.length === 0) {
-      const stocks: Record<string, number> = {};
-      products.forEach((p) => { stocks[p.id] = p.stock; });
-      initialStocksRef.current = stocks;
-      clearInventoryAlerts();
+    if (simulationResults.length > 0 && currentHour < simulationHours && allResultsRef.current.length > 0) {
+      resumeSimulation();
+      return;
     }
 
-    if (simulationResults.length > 0 && !isSimulating) {
-      clearSimulationResults();
-      setCurrentHour(0);
-      setProgress(0);
-      const stocks: Record<string, number> = {};
-      products.forEach((p) => { stocks[p.id] = p.stock; });
-      initialStocksRef.current = stocks;
-      clearInventoryAlerts();
-    }
+    clearSimulationResults();
+    setCurrentHour(0);
+    setProgress(0);
+    const stocks: Record<string, number> = {};
+    products.forEach((p) => { stocks[p.id] = p.stock; });
+    initialStocksRef.current = stocks;
+    clearInventoryAlerts();
 
     setSimulating(true);
 
@@ -104,7 +101,46 @@ export default function TrafficScript() {
       startHour,
       simulationHours
     );
+    allResultsRef.current = results;
 
+    let hourIndex = 0;
+
+    const runHour = () => {
+      if (hourIndex >= simulationHours) {
+        setSimulating(false);
+        if (timerRef.current) clearInterval(timerRef.current);
+        return;
+      }
+
+      const result = results[hourIndex];
+      if (result) {
+        addSimulationResult(result);
+        setLiveResult(result);
+        setCurrentHour(hourIndex + 1);
+        setProgress(((hourIndex + 1) / simulationHours) * 100);
+
+        checkInventoryAlerts(result);
+
+        const newCustomers = Array.from({ length: Math.min(20, Math.floor(result.visitors / 10)) }).map((_, i) => ({
+          id: Date.now() + i,
+          emoji: customerEmojis[Math.floor(Math.random() * customerEmojis.length)],
+          x: Math.random() * 100,
+          delay: Math.random() * 2,
+        }));
+        setCustomers((prev) => [...prev.slice(-30), ...newCustomers]);
+      }
+
+      hourIndex++;
+    };
+
+    runHour();
+    timerRef.current = window.setInterval(runHour, 2000 / speed);
+  };
+
+  const resumeSimulation = () => {
+    setSimulating(true);
+
+    const results = allResultsRef.current;
     let hourIndex = simulationResults.length;
 
     const runHour = () => {
@@ -156,6 +192,7 @@ export default function TrafficScript() {
     setLiveResult(null);
     setCustomers([]);
     initialStocksRef.current = {};
+    allResultsRef.current = [];
   };
 
   useEffect(() => {
@@ -478,7 +515,7 @@ export default function TrafficScript() {
                       <button
                         onClick={() => {
                           dismissAlert(alert.productId);
-                          startSimulation();
+                          resumeSimulation();
                         }}
                         className="flex-1 text-xs py-1.5 bg-gray-400 text-white rounded-lg font-medium hover:bg-gray-500 transition-colors"
                       >
